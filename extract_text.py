@@ -4,7 +4,7 @@ import cv2, numpy as np, time, random, math, pytesseract
 pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe"
 
 img_roi = [48, 185, 980, 656]  # x1, y1, x2, y2
-src_img_dir = "images/source/3.png"
+src_img_dir = "images/source/7.png"
 bg_img = cv2.imread("images/background.png", cv2.IMREAD_COLOR)[img_roi[1]:img_roi[3], img_roi[0]:img_roi[2]]
 # The background of the area is constant. So I have used a reference background image and removed pixels which have a similar H value as the background
 
@@ -45,7 +45,9 @@ opened = cv2.dilate(opened, (5, 5))
 opened = cv2.morphologyEx(opened, cv2.MORPH_CLOSE, (3,3))
 opened = cv2.erode(opened, (3,3))
 opened = cv2.erode(opened, (5,5))
-
+opened = cv2.dilate(opened, (3,3))
+opened = cv2.dilate(opened, (3,3))
+opened = cv2.dilate(opened, (3,3))
 final_img = opened
 #edges = cv2.Canny(final_img, 0, 255)
 
@@ -109,28 +111,44 @@ for group in line_groups:
     r_centriod = representation_line[1]
     print("r centroid", r_centriod)
     angle = math.atan2(r_c[3]-r_c[1], r_c[2]-r_c[0]) * 180.0 / math.pi
+    """connectivity = 8
+    min_size = 5
+    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(final_img, connectivity, cv2.CV_32S)
+    sizes = stats[1:, -1]
+    num_labels = num_labels - 1
+    for i in range(0, num_labels):
+        if sizes[i] >= min_size:
+            final_img[labels == i + 1] = 0"""
     t_img = cv2.bitwise_not(final_img).copy()
     rows, cols = t_img.shape
     root_mat = cv2.getRotationMatrix2D(representation_line[1], angle, 1)
     result = cv2.warpAffine(t_img, root_mat,(cols, rows), borderMode=cv2.BORDER_CONSTANT, borderValue=(255,255,255))
-    cropped_result = result[max(int(r_centriod[1]-img_height), 0):min(int(r_centriod[1]+2), result.shape[0]), max(0,int(r_centriod[0]-img_width)):min(result.shape[1],int(r_centriod[0]+img_width))]
-    total_pixels = cropped_result.shape[0] * cropped_result.shape[1]
+    cropped_result = result[max(int(r_centriod[1]-img_height), 0):min(int(r_centriod[1]+4), result.shape[0]), max(0,int(r_centriod[0]-img_width)):min(result.shape[1],int(r_centriod[0]+img_width))]
+    cropped_result = cv2.resize(cropped_result, (0,0), fx = 2, fy=2)
+
+    #cropped_result = cv2.medianBlur(cropped_result, 7)
+
+    """total_pixels = cropped_result.shape[0] * cropped_result.shape[1]
     black_pixels = total_pixels - cv2.countNonZero(cropped_result)
     if black_pixels/total_pixels * 100 >= 10:
         res = pytesseract.image_to_string(cropped_result, lang="eng", config="--psm 10")
         print("tesseract:", res)
     else:
-        print("skip", (total_pixels-black_pixels)/total_pixels * 100)
+        res = pytesseract.image_to_string(cropped_result, lang="eng", config="--psm 10")
+        print("tesseract:", res)
+        print("skip", (total_pixels-black_pixels)/total_pixels * 100)"""
+    res = pytesseract.image_to_string(cropped_result, lang="eng", config="--psm 10")
+    print("tesseract:", res)
     cv2.imshow("", cropped_result)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
     linecnt = 0
-    """for l in sorted_group:
+    for l in sorted_group:
         cd = l[0]
         if linecnt != 0:
             cv2.line(src_img, (cd[0], cd[1]), (cd[2], cd[3]), color, 2)
-        linecnt += 1"""
+        linecnt += 1
 
 
 #cv2.imshow("can", edges)
