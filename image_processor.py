@@ -1,10 +1,6 @@
 # -*- coding:utf-8 -*-
 import cv2, numpy as np, time, random, math, pytesseract
 
-
-
-
-
 class Preprocessor:
     def __init__(self, background_img="images/background.png"):
         self.roi_area = [48, 185, 980, 656]  # x1, y1, x2, y2
@@ -21,6 +17,11 @@ class Preprocessor:
         self.cluster_linelist = []
         self.cluster_line_groups = []
         self.cluster_in_class = []
+
+        self.cluster_contour_maxdist = 100
+        self.cluster_contours = []
+        self.cluster_contour_groups = []
+        self.cluster_contour_centroids_in_class = []
 
         self.output_width = 40
         self.output_height = 60
@@ -67,17 +68,18 @@ class Preprocessor:
         input_gray = cv2.cvtColor(input_image, cv2.COLOR_BGR2GRAY)
         blur = cv2.GaussianBlur(input_gray, (3, 3), 0)
         sharpened = cv2.addWeighted(blur, 1.5, input_gray, -0.5, 0)
-        denoised = cv2.fastNlMeansDenoising(sharpened, h=13, templateWindowSize=7, searchWindowSize=21)
+        denoised = cv2.fastNlMeansDenoising(sharpened, h=11, templateWindowSize=7, searchWindowSize=21)
 
-        ret, thresh = cv2.threshold(denoised, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
-
+        #ret, thresh = cv2.threshold(denoised, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
+        ret, thresh = cv2.threshold(denoised, 27, 255, cv2.THRESH_BINARY)
         kernel = np.ones((3, 3), np.uint8)
         #operated = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
         #operated = cv2.morphologyEx(operated, cv2.MORPH_CLOSE, kernel)
         operated = cv2.erode(thresh, kernel)
         operated = cv2.dilate(operated, kernel)
-        operated = thresh
+        operated = operated
         return operated
+
 
     def distance(self, p1, p2):
         return math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2)
@@ -88,13 +90,16 @@ class Preprocessor:
         :param input_img: BINARY input image with linese
         :return: a list of sublists x, where an element of x is a tuple ((x1,y1,x2,y1), (cx,cy)), point c is center of line
         """
+        self.cluster_hough_lines = []
+        self.cluster_visited_lines = []
+        self.cluster_linelist = []
+        self.cluster_line_groups = []
+        self.cluster_in_class = []
 
         self.cluster_hough_lines = cv2.HoughLinesP(input_img, rho=7, theta= np.pi / 180, threshold=10, minLineLength=8, maxLineGap=2)
-        self.cluster_linelist = []
+
         for lv in self.cluster_hough_lines:
             self.cluster_linelist.append((lv[0], (int((lv[0][0] + lv[0][2]) / 2), int((lv[0][1] + lv[0][3]) / 2))))
-        self.cluster_line_groups = []
-        self.cluster_visited_lines = []
 
         for line in self.cluster_linelist:
             coords = line[0]
@@ -134,6 +139,76 @@ class Preprocessor:
         else:
             for n2 in nbhh:
                 self.cluster_traverse(n2, group)
+
+    def find_text_contour_hierachy(self, input_img):
+        """
+        An alternative attempt to isolate text, instead of using line clustering. Current method is to find contours
+        and resolve points using approxPolyDP
+        :param input_img: binary image, white as features
+        :return: list of tu
+        """
+        _, contours, _ = cv2.findContours(input_img, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        contours = contours[::-1]
+        self.cluster_contours = []
+        self.cluster_contour_groups = []
+        self.cluster_contour_centroids_in_class = []
+        # ret_list is a list of tuple v where
+        # v = (points, (c_x, c_y), (l_x, l_y) where points is a list of points, point c which is mean point, point
+        # l which is located lowest on the screen, meaning highest y value.
+        for contour in contours:
+            points = cv2.approxPolyDP(contour, 0.3 * cv2.arcLength(contour, True), True)
+            contour_points = []
+            center_x = 0
+            center_y = 0
+            lowest_x = 0
+            lowest_y = 0
+            for j in points:
+
+                p_x, p_y = j[0]
+                if p_y > lowest_y:
+                    lowest_x = p_x
+                    lowest_y = p_y
+                center_x += p_x
+                center_y += p_y
+                contour_points.append((p_x, p_y))
+
+            self.cluster_contours.append((contour_points, (int(center_x/len(points)), int(center_y/len(points))), (lowest_x, lowest_y)))
+
+        for contour in self.cluster_contours:
+            coords = contour[0]
+            centroid = contour[1]
+            lowest = contour[2]
+            print("centroid", centroid)
+            print("lowest", lowest)
+            if not self.cluster_contour_groups or centroid not in self.cluster_contour_centroids_in_class:
+                group_obj = [[], contour]
+                resolved = False
+                current_contour = contour
+                self.cluster_contour_traverse(current_contour, group_obj)
+                self.cluster_contour_groups.append(group_obj)
+
+        return self.cluster_contour_groups
+
+    def cluster_contour_traverse(self, current, group):
+        group[0].append(current)
+        if current[2][1] > group[1][2][1]:
+            group[1] = current
+        self.cluster_contour_centroids_in_class.append(current[1])
+        neighbors = self.cluster_contour_find_neighbor(current)
+        if not neighbors:
+            return 0
+        else:
+            for neighbor in neighbors:
+                self.cluster_traverse(neighbor, group)
+
+    def cluster_contour_find_neighbor(self,cont):
+        return_list = []
+        for lt in self.cluster_contours:
+            if self.distance(cont[1], lt[1]) <= self.cluster_contour_maxdist and lt[1] not in self.cluster_contour_centroids_in_class and not (
+                    cont[2] == lt[2]):
+                return_list.append(lt)
+        return return_list
+
 
     def find_baseline_and_deskew(self, input_img, line_group):
         """
@@ -219,12 +294,27 @@ if __name__ == "__main__":
         img = prc.crop_roi(cv2.imread("images/source/%d.png"%(x), cv2.IMREAD_COLOR))
         representation = img.copy()
         tx = prc.remove_background(img)
-        cv2.imshow("", tx)
-        cv2.waitKey(0)
         processed = prc.threshold_and_preprocess(tx)
-        cv2.imshow("", processed)
+
+
+        contour_groups = prc.find_text_contour_hierachy(processed)
+
+        for group in contour_groups:
+            color = (random.randrange(0, 254), random.randrange(0, 254), random.randrange(0, 254))
+            #print(group[0])
+            #print(group[1])
+            print(len(group))
+            #contours, lowest_contour = group
+            """for contour, _, _ in contours:
+                cv2.drawContours(tx, [contour], -1, color, 1)"""
+
+            """for p in lowest_contour[0]:
+                cv2.circle(tx, p, 2, color, -1)"""
+
+        cv2.imshow("processed", processed)
+        cv2.imshow("bg_removal", tx)
         cv2.waitKey(0)
-        line_hierachy = prc.cluster_lines(processed)
+        """line_hierachy = prc.cluster_lines(processed)
         for group in line_hierachy:
             color = (random.randrange(0, 254), random.randrange(0, 254), random.randrange(0, 254))
             for line_obj in group:
@@ -237,7 +327,7 @@ if __name__ == "__main__":
             cv2.imshow(str(centroid), img)
             #cv2.imwrite("cropped.png", img)
             print(prc.run_tesseract(img, lang="eng"))
-            cv2.waitKey(0)
+            cv2.waitKey(0)"""
 
 
 
