@@ -386,7 +386,7 @@ if __name__ == "__main__":
         processed = prc.threshold_and_preprocess(tx)
         cv2.imshow("processed", processed)
 
-        contour_groups = prc.find_text_contour_hierachy(processed)
+        """contour_groups = prc.find_text_contour_hierachy(processed)
 
         for group in contour_groups:
             color = (random.randrange(0, 254), random.randrange(0, 254), random.randrange(0, 254))
@@ -398,8 +398,8 @@ if __name__ == "__main__":
             cv2.circle(tx, lowest_contour[0][0], 2, (0,0,255), -1)
             cv2.circle(tx, lowest_contour[0][1], 2, (0,0,255), -1)
 
-        cv2.imshow("bg_removal", tx)
-        cv2.imshow("processed", processed)
+        cv2.imshow("bg_removal", tx)"""
+        cv2.imshow("bg", tx)
         cv2.waitKey(0)
 
         """for deskewed, ct in prc.find_baseline_and_deskew_from_contour(processed, contour_groups):
