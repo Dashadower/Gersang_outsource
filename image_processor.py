@@ -79,7 +79,7 @@ class Preprocessor:
         operated = cv2.dilate(operated, kernel)
         operated = operated
         contour_area_threshold = 20
-        _, contours, _ = cv2.findContours(operated, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        contours, _ = cv2.findContours(operated, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
         bgred = cv2.cvtColor(operated, cv2.COLOR_GRAY2BGR)
         for ct in contours:
             if cv2.contourArea(ct) <= contour_area_threshold:
@@ -156,7 +156,7 @@ class Preprocessor:
         :return: list of tuple (lx, h) where lx is a list of cluster_contour object within group,
         and h a cluster_contour object with the highest y value
         """
-        _, contours, _ = cv2.findContours(input_img, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        contours, _ = cv2.findContours(input_img, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
         contours = contours[::-1]
         self.cluster_contours = []
         self.cluster_contour_groups = []
