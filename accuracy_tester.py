@@ -8,7 +8,7 @@ logger.debug("Program start")
 try:
     from image_processor import Preprocessor
     from screencap import MapleScreenCapturer
-    import cv2
+    import cv2, imutils, numpy as np
 except:
     logger.exception("오류 발생!")
     os.system("pause")
@@ -22,9 +22,11 @@ if not window_handle:
 else:
     try:
         while True:
-            captured_img = scap.capture(set_focus=False, hwnd=window_handle)
-            cropped = processor.crop_roi()
-            cv2.imshow("window", cropped)
+            captured_img = np.array(scap.capture(set_focus=False, hwnd=window_handle), dtype=np.uint8)
+
+            cropped = processor.crop_roi(captured_img)
+            render = cropped.copy()
+            cv2.imshow("window", imutils.resize(cropped, width=300))
             inp = cv2.waitKey(1)
             if inp == ord("q"):
                 bg_removed = processor.remove_background(cropped)
@@ -35,7 +37,6 @@ else:
                 print(contour_groups)
                 render = cropped.copy()
                 for deskewed, ct in processor.find_baseline_and_deskew_from_contour(processed, contour_groups):
-
                     result = processor.run_tesseract(deskewed)
                     if result.isalpha():
                         result = result.upper()
