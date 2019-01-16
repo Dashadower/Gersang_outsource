@@ -35,7 +35,8 @@ class Preprocessor:
         :param input_img: BGR image
         :return: BGR image with background portions set to 0
         """
-        reconstruction_image = np.zeros([input_img.shape[0], input_img.shape[1], 3], dtype=np.uint8)
+
+        """reconstruction_image = np.zeros([input_img.shape[0], input_img.shape[1], 3], dtype=np.uint8)
         hue_offset = 5
 
         input_img_hsv = cv2.cvtColor(input_img, cv2.COLOR_BGR2HSV)
@@ -56,7 +57,32 @@ class Preprocessor:
                 else:
                     reconstruction_image[y][x] = input_img[y][x]
 
-        return reconstruction_image
+        return reconstruction_image"""
+
+        input_hsv = cv2.cvtColor(input_img, cv2.COLOR_BGR2HSV)
+
+
+        delta = np.subtract(input_img, self.bg_img)
+        delta_hsv = cv2.cvtColor(input_img, cv2.COLOR_BGR2HSV)
+        #rows, cols = np.where(delta_hsv[:,:, 0] > 18, delta_hsv[:,:], np.array([0,0,0], dtype=np.uint8))
+        H, S, V = cv2.split(delta_hsv)
+        mask = (H >= 70) & (S >= 109)
+        delta[mask] = input_img[mask]
+        mask = (H >= 210) & (H <= 220)
+        delta[mask] = np.array([0,0,0], dtype=np.uint8)
+
+        mask = (H <= 2)
+        delta[mask] = np.array([0, 0, 0], dtype=np.uint8)
+
+        #delta[rows][cols] = input_img[rows][cols]
+        return delta
+
+    def preprocess_alt(self, input_image):
+        input_gray = cv2.cvtColor(input_image, cv2.COLOR_BGR2GRAY)
+        input_img_hsv = cv2.cvtColor(input_image, cv2.COLOR_BGR2HSV)
+        _, threshed = cv2.threshold(input_gray, 14, 255, cv2.THRESH_BINARY)
+        _, contours, _ = cv2.findContours(threshed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        return threshed, contours
 
     def threshold_and_preprocess(self, input_image):
         """
@@ -79,7 +105,7 @@ class Preprocessor:
         operated = cv2.dilate(operated, kernel)
         operated = operated
         contour_area_threshold = 20
-        contours, _ = cv2.findContours(operated, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        _, contours, _ = cv2.findContours(operated, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
         bgred = cv2.cvtColor(operated, cv2.COLOR_GRAY2BGR)
         for ct in contours:
             if cv2.contourArea(ct) <= contour_area_threshold:
@@ -156,7 +182,7 @@ class Preprocessor:
         :return: list of tuple (lx, h) where lx is a list of cluster_contour object within group,
         and h a cluster_contour object with the highest y value
         """
-        contours, _ = cv2.findContours(input_img, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        _, contours, _ = cv2.findContours(input_img, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
         contours = contours[::-1]
         self.cluster_contours = []
         self.cluster_contour_groups = []
@@ -254,7 +280,7 @@ class Preprocessor:
                 angle = 360 - angle"""
             angle1 = (angle + 360) % 360
             angle2 = (angle1 + 180) % 360
-            print(angle1, angle2)
+            #print(angle1, angle2)
             #kernel = np.array([[-1,-1,-1], [-1,1,-1], [-1,-1,-1]], dtype=np.uint8)
             #input_img = cv2.filter2D(input_img, -1 ,kernel)
 
@@ -262,7 +288,10 @@ class Preprocessor:
             t_img = cv2.cvtColor(t_img, cv2.COLOR_GRAY2BGR)
             cv2.drawContours(t_img, [representation_contour[3]], -1, (255, 255, 255), -1)
             t_img = cv2.cvtColor(t_img, cv2.COLOR_BGR2GRAY)
-
+            kernel = np.zeros((3,3), dtype=np.uint8)
+            #t_img = cv2.morphologyEx(t_img, cv2.MORPH_OPEN, kernel=kernel)
+            #t_img = cv2.morphologyEx(t_img, cv2.MORPH_OPEN, kernel=kernel)
+            #t_img = cv2.erode(t_img, kernel)
             rows, cols = t_img.shape
             root_mat = cv2.getRotationMatrix2D(r_centroid, angle, 1)
             rotated = cv2.warpAffine(t_img, root_mat, (cols, rows), borderMode=cv2.BORDER_CONSTANT,
@@ -285,6 +314,8 @@ class Preprocessor:
 
             if cv2.countNonZero(cropped_result) > cv2.countNonZero(cropped_result_2):
                 cropped_result = cropped_result_2
+
+
             """cropped_result = cv2.resize(cropped_result,None, fx=2.0, fy=2.0)
 
             kernel = np.ones((5, 5), dtype=np.uint8)
@@ -380,15 +411,24 @@ class Preprocessor:
 if __name__ == "__main__":
     prc = Preprocessor()
     for x in range(2, 12):
+        print(x)
+        start = time.time()
         img = prc.crop_roi(cv2.imread("images/source/%d.png"%(x), cv2.IMREAD_COLOR))
         representation = img.copy()
         tx = prc.remove_background(img)
-        processed = prc.threshold_and_preprocess(tx)
+
+        processed, cont = prc.preprocess_alt(tx)
+
+        #cv2.drawContours(tx, cont, -1, (0,255,0), -1)
         cv2.imshow("processed", processed)
+        cv2.imshow("bg", tx)
 
-        """contour_groups = prc.find_text_contour_hierachy(processed)
-
-        for group in contour_groups:
+        contour_groups = prc.find_text_contour_hierachy(processed)
+        for deskewed, ct in prc.find_baseline_and_deskew_from_contour(processed, contour_groups):
+            print(prc.run_tesseract(deskewed))
+        print("time", time.time() - start)
+        cv2.waitKey(0)
+        """for group in contour_groups:
             color = (random.randrange(0, 254), random.randrange(0, 254), random.randrange(0, 254))
             #print(group[0])
             #print(group[1])
@@ -396,19 +436,21 @@ if __name__ == "__main__":
             cv2.circle(tx, lowest_contour[1], 3, (0,0,255), -1)
 
             cv2.circle(tx, lowest_contour[0][0], 2, (0,0,255), -1)
-            cv2.circle(tx, lowest_contour[0][1], 2, (0,0,255), -1)
+            cv2.circle(tx, lowest_contour[0][1], 2, (0,0,255), -1)"""
 
-        cv2.imshow("bg_removal", tx)"""
-        cv2.imshow("bg", tx)
-        cv2.waitKey(0)
+
+
+
 
         """for deskewed, ct in prc.find_baseline_and_deskew_from_contour(processed, contour_groups):
             result = prc.run_tesseract(deskewed)
-            print(ct)
+            cv2.imshow("des", deskewed)
+            print(result)
             cv2.putText(representation, result, ct, cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            cv2.waitKey(0)"""
 
-        cv2.imshow("dt", representation)
-        cv2.waitKey(0)"""
+
+
 
 
 
