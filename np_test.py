@@ -16,5 +16,5 @@ mat2 = np.array(
     ]
 )
 
-print(np.where((mat2-mat==0).all(axis=2), np.array([0,0]), mat2))
+print(np.where((mat2-mat==0).all(axis=2, keepdims=True), np.array([0,0]), mat2))
 

@@ -61,8 +61,8 @@ class Preprocessor:
 
         input_hsv = cv2.cvtColor(input_img, cv2.COLOR_BGR2HSV)
 
+        delta = np.where((input_hsv - self.bg_hsv).all(axis=2, keepdims=True),input_img, np.array([0,0,0], dtype=np.uint8))
 
-        delta = np.subtract(input_img, self.bg_img)
         delta_hsv = cv2.cvtColor(input_img, cv2.COLOR_BGR2HSV)
         #rows, cols = np.where(delta_hsv[:,:, 0] > 18, delta_hsv[:,:], np.array([0,0,0], dtype=np.uint8))
         H, S, V = cv2.split(delta_hsv)
@@ -423,9 +423,9 @@ if __name__ == "__main__":
         cv2.imshow("processed", processed)
         cv2.imshow("bg", tx)
 
-        contour_groups = prc.find_text_contour_hierachy(processed)
+        """contour_groups = prc.find_text_contour_hierachy(processed)
         for deskewed, ct in prc.find_baseline_and_deskew_from_contour(processed, contour_groups):
-            print(prc.run_tesseract(deskewed))
+            print(prc.run_tesseract(deskewed))"""
         print("time", time.time() - start)
         cv2.waitKey(0)
         """for group in contour_groups:
