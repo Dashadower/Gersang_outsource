@@ -31,23 +31,22 @@ else:
             cv2.imshow("window", imutils.resize(cropped, width=300))
             inp = cv2.waitKey(1)
             if inp == ord("q"):
+                representation = captured_img.copy()
                 start = time.time()
-                bg_removed = processor.remove_background(cropped)
-                cv2.imwrite("bg_removed.png", bg_removed)
-                processed = processor.threshold_and_preprocess(bg_removed)
-                cv2.imwrite("processed.png", processed)
-                contour_groups = processor.find_text_contour_hierachy(processed)
 
-                render = cropped.copy()
+                bg_removed = processor.remove_background(cropped)
+                processed = processor.preprocess_alt(bg_removed)
+                contour_groups = processor.find_text_contour_hierachy(processed)
                 for deskewed, ct in processor.find_baseline_and_deskew_from_contour(processed, contour_groups):
                     result = processor.run_tesseract(deskewed)
-                    if result.isalpha():
-                        result = result.upper()
-                    if len(result) > 1:
-                        result = "?"
+
+                    if result.isalpha() or result.isdigit():
+                        cv2.putText(representation, result[0], ct, cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2)
+                    else:
+                        cv2.putText(representation, result, ct, cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+
                 print("처리시간:", time.time() - start)
-                cv2.putText(render, result, ct, cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-                cv2.imshow("window", render)
+                cv2.imshow("window", representation)
                 cv2.waitKey(0)
 
     except:

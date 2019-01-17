@@ -1,5 +1,5 @@
 # -*- coding:utf-8 -*-
-import cv2, numpy as np, time, random, math, pytesseract
+import cv2, numpy as np, time, random, math, pytesseract, imutils
 
 class Preprocessor:
     def __init__(self, background_img="images/background.png"):
@@ -10,13 +10,6 @@ class Preprocessor:
         self.bg_img = cv2.imread(background_img, cv2.IMREAD_COLOR)[self.roi_area[1]:self.roi_area[3], self.roi_area[0]:self.roi_area[2]]
         self.bg_hsv = cv2.cvtColor(self.bg_img, cv2.COLOR_BGR2HSV)
 
-        self.cluster_line_maxdist = 35
-
-        self.cluster_hough_lines = []
-        self.cluster_visited_lines = []
-        self.cluster_linelist = []
-        self.cluster_line_groups = []
-        self.cluster_in_class = []
 
         self.cluster_contour_maxdist = 50
         self.cluster_contours = []
@@ -36,163 +29,82 @@ class Preprocessor:
         :return: BGR image with background portions set to 0
         """
 
-        """reconstruction_image = np.zeros([input_img.shape[0], input_img.shape[1], 3], dtype=np.uint8)
-        hue_offset = 5
-
-        input_img_hsv = cv2.cvtColor(input_img, cv2.COLOR_BGR2HSV)
-
-        for y in range(input_img_hsv.shape[0]):
-            for x in range(input_img_hsv.shape[1]):
-                sp = input_img_hsv[y][x]
-                bp = self.bg_hsv[y][x]
-
-                if bp[0] - hue_offset <= sp[0] <= bp[0] + hue_offset:
-                    if sp[1] >= 109:
-                        reconstruction_image[y][x] = input_img[y][x]
-                elif sp[1] <= 90:
-                    if sp[0] >= 67:
-                        reconstruction_image[y][x] = input_img[y][x]
-                    elif sp[2] >= 125 and sp[1] >= 20:
-                        reconstruction_image[y][x] = input_img[y][x]
-                else:
-                    reconstruction_image[y][x] = input_img[y][x]
-
-        return reconstruction_image"""
+        hue_offset = 7
+        saturation_offet = 115
+        """
+        An explanation on how background is removed.
+        Currently the remover uses two conditions to remove background image, since noise is present on the background
+        and using just cv2.sobtract() returns very poor results.
+        Condition 1: If input_img[y][x] is within hue_offset range of bg_img[y][x], that pixel is considered positive
+        for condition 1
+        Condition 2: if saturation value of input_img[y][x] is less or equal than saturation_offset, that pixel is
+        considered positive for condition 2
+        
+        If condition 1 and 2 are both positive for give pixel (x,y), (x,y) is replaced to (0,0,0), 
+        else (x,y) = input_img[y][x]
+        """
 
         input_hsv = cv2.cvtColor(input_img, cv2.COLOR_BGR2HSV)
+        inp_h, inp_s, inp_v = cv2.split(input_hsv)
+        bg_h = cv2.split(self.bg_hsv)[0]
+        mask1 = np.logical_and((inp_h>= bg_h-hue_offset), (inp_h<=bg_h+hue_offset))
+        mask2 = inp_s <= saturation_offet
 
-        delta = np.where((input_hsv - self.bg_hsv).all(axis=2, keepdims=True),input_img, np.array([0,0,0], dtype=np.uint8))
-
-        delta_hsv = cv2.cvtColor(input_img, cv2.COLOR_BGR2HSV)
-        #rows, cols = np.where(delta_hsv[:,:, 0] > 18, delta_hsv[:,:], np.array([0,0,0], dtype=np.uint8))
-        H, S, V = cv2.split(delta_hsv)
-        mask = (H >= 70) & (S >= 109)
-        delta[mask] = input_img[mask]
-        mask = (H >= 210) & (H <= 220)
-        delta[mask] = np.array([0,0,0], dtype=np.uint8)
-
-        mask = (H <= 2)
-        delta[mask] = np.array([0, 0, 0], dtype=np.uint8)
-
-        #delta[rows][cols] = input_img[rows][cols]
+        delta = np.where(np.reshape(np.logical_and(mask1, mask2), inp_h.shape+(1,)), np.array([0, 0, 0], dtype=np.uint8), input_img)
         return delta
 
     def preprocess_alt(self, input_image):
-        input_gray = cv2.cvtColor(input_image, cv2.COLOR_BGR2GRAY)
-        input_img_hsv = cv2.cvtColor(input_image, cv2.COLOR_BGR2HSV)
-        _, threshed = cv2.threshold(input_gray, 14, 255, cv2.THRESH_BINARY)
-        _, contours, _ = cv2.findContours(threshed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        return threshed, contours
-
-    def threshold_and_preprocess(self, input_image):
         """
-        thresholds input image and performs preprocesing operations
-        :param input_image: BGR image
-        :return: Binary image with text as white
+        This function handle preprocessing of image. If a background removed BGR image imput_image is given,
+        this function will remove noise and threshold the image to have features/letters as white and others black.
+        Note this operation is not perfect and can remove parts of features or keep noise
+        :param input_image: BGR image with background removed
+        :return: Binary grayscale image with features as white
         """
-
         input_gray = cv2.cvtColor(input_image, cv2.COLOR_BGR2GRAY)
-        blur = cv2.GaussianBlur(input_gray, (3, 3), 0)
-        sharpened = cv2.addWeighted(blur, 1.5, input_gray, -0.5, 0)
-        denoised = cv2.fastNlMeansDenoising(sharpened, h=11, templateWindowSize=7, searchWindowSize=21)
 
-        #ret, thresh = cv2.threshold(denoised, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
-        ret, thresh = cv2.threshold(denoised, 27, 255, cv2.THRESH_BINARY)
-        kernel = np.ones((3, 3), np.uint8)
-        #operated = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
-        #operated = cv2.morphologyEx(operated, cv2.MORPH_CLOSE, kernel)
-        operated = cv2.erode(thresh, kernel)
-        operated = cv2.dilate(operated, kernel)
-        operated = operated
-        contour_area_threshold = 20
-        _, contours, _ = cv2.findContours(operated, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-        bgred = cv2.cvtColor(operated, cv2.COLOR_GRAY2BGR)
-        for ct in contours:
-            if cv2.contourArea(ct) <= contour_area_threshold:
-                cv2.drawContours(bgred, [ct], -1, (0,0,0), -1)
-        #operated = cv2.cvtColor(bgred, cv2.COLOR_BGR2GRAY)
-        #operated = cv2.erode(operated, kernel)
-        return operated
+        _, threshed = cv2.threshold(input_gray, 50, 255, cv2.THRESH_BINARY)
 
+        denoised = cv2.fastNlMeansDenoising(threshed, h=15, templateWindowSize=7, searchWindowSize=21)
+
+        return denoised
 
     def distance(self, p1, p2):
         return math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2)
 
-    def cluster_lines(self, input_img):
-        """
-        Clusters white lines in binary images by distance between each other, using self.cluster_line_maxdist
-        :param input_img: BINARY input image with linese
-        :return: a list of sublists x, where an element of x is a tuple ((x1,y1,x2,y1), (cx,cy)), point c is center of line
-        """
-        self.cluster_hough_lines = []
-        self.cluster_visited_lines = []
-        self.cluster_linelist = []
-        self.cluster_line_groups = []
-        self.cluster_in_class = []
-
-        self.cluster_hough_lines = cv2.HoughLinesP(input_img, rho=7, theta= np.pi / 180, threshold=10, minLineLength=8, maxLineGap=2)
-
-        for lv in self.cluster_hough_lines:
-            self.cluster_linelist.append((lv[0], (int((lv[0][0] + lv[0][2]) / 2), int((lv[0][1] + lv[0][3]) / 2))))
-
-        for line in self.cluster_linelist:
-            coords = line[0]
-            centroid = line[1]
-            if not self.cluster_line_groups or centroid not in self.cluster_in_class:
-                group_obj = []
-                resolved = False
-                current_line = line
-                self.cluster_traverse(current_line, group_obj)
-                self.cluster_line_groups.append(group_obj)
-
-        return self.cluster_line_groups
-
-    def cluster_check_class(self, line_obj):
-        for gp in self.cluster_line_groups:
-            for lin in gp:
-                if (lin[0] == line_obj[0]).all():
-                    return True
-
-        return False
-
-    def cluster_find_neighbor(self,line_obj):
-        return_list = []
-        for lt in self.cluster_linelist:
-            if self.distance(line_obj[1], lt[1]) <= self.cluster_line_maxdist and lt[1] not in self.cluster_in_class and not (
-                    line_obj[0] == lt[0]).all():
-                return_list.append(lt)
-        return return_list
-
-    def cluster_traverse(self, line_obj, group):
-        group.append(line_obj)
-        #self.cluster_visited_lines.append(line_obj[1])
-        self.cluster_in_class.append(line_obj[1])
-        nbhh = self.cluster_find_neighbor(line_obj)
-        if not nbhh:
-            return 0
-        else:
-            for n2 in nbhh:
-                self.cluster_traverse(n2, group)
 
     def find_text_contour_hierachy(self, input_img):
         """
-        An alternative attempt to isolate text, instead of using line clustering. Current method is to find contours
-        and resolve points using approxPolyDP
+        This function groups nearby contours into groups and finds the contour which is deemed to be the baseline
+        How it works is explained more in detail below
         :param input_img: binary image, white as features
         :return: list of tuple (lx, h) where lx is a list of cluster_contour object within group,
         and h a cluster_contour object with the highest y value
+
+        cluster_contour object: tuple (l_p, center, lowest, ct)
+        l_p : list of points(x,y) within contour
+        center: tuple (x,y) of calculated mean point of contour
+        lowest: tuple(x,y) of point which has highest y value = lowest on screen
+        ct: contour object of countour returned by findContours
         """
-        _, contours, _ = cv2.findContours(input_img, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+
+        # This part is for support for newer OpenCV versions
+        try:
+            contours, _ = cv2.findContours(input_img, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        except:
+            _, contours, _ = cv2.findContours(input_img, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+
         contours = contours[::-1]
+
+        # Reinitialize temporary class variables
         self.cluster_contours = []
         self.cluster_contour_groups = []
         self.cluster_contour_centroids_in_class = []
-        # ret_list is a list of tuple v where
-        # v = (points, (c_x, c_y), (l_x, l_y), ct) where points is a list of points, point c which is mean point, point
-        # l which is located lowest on the screen, meaning highest y value. and ct the contour object
+
+        # Iterate over all contours and precalculate mean and lowest point
         for contour in contours:
-            """if cv2.contourArea(contour) <= 10:
-                continue"""
+            if cv2.contourArea(contour) <= 10:
+                continue
             points = cv2.approxPolyDP(contour, 0.3 * cv2.arcLength(contour, True), True)
             contour_points = []
             center_x = 0
@@ -200,7 +112,6 @@ class Preprocessor:
             lowest_x = 0
             lowest_y = 0
             for j in points:
-
                 p_x, p_y = j[0]
                 if p_y > lowest_y:
                     lowest_x = p_x
@@ -211,24 +122,32 @@ class Preprocessor:
 
             self.cluster_contours.append((contour_points, (int(center_x/len(points)), int(center_y/len(points))), (lowest_x, lowest_y), contour))
 
+        # Iterate over cluster_contours and group contours recursively using set self.cluster_contour_maxdist as threshold
         for contour in self.cluster_contours:
-            coords = contour[0]
             centroid = contour[1]
-            lowest = contour[2]
             if not self.cluster_contour_groups or centroid not in self.cluster_contour_centroids_in_class:
                 group_obj = [[], contour]
-                resolved = False
+                # group_obj is cluster_group representing a single contour group passed to cluster_contour_traverse
+
                 self.cluster_contour_traverse(contour, group_obj)
+
                 points = []
                 for cv in group_obj[0]:
                     points.extend(cv[0])
                 points = np.array(points)
+
                 if len(group_obj[0]) >= 2 and cv2.contourArea(points) >= 50:
                     self.cluster_contour_groups.append(group_obj)
 
         return self.cluster_contour_groups
 
     def cluster_contour_traverse(self, current, cluster_group):
+        """
+        Recursively group nearby contours.
+        :param current: current cluster_contour object
+        :param cluster_group: group object which current is in
+        :return: None
+        """
         cluster_group[0].append(current)
 
         if current[2][1] > cluster_group[1][2][1]:
@@ -257,48 +176,43 @@ class Preprocessor:
         is binary deskewed image with size of self.output_width and height, and point which is center point of reference
         line.
         :param input_img: Binary image where background is black, features are white
-        :param line_group: same format as output of self.find_text_contour_hierachy
+        :param contour_group: same format as output of self.find_text_contour_hierachy
         :return: list of tuples (img, point) where image is binary deskewed image where features are black,
-        with width, height of self.output_width and self.output_height, point which is center point coordinate,
-        relative to ROI region, of reference line.
+        with width, height of self.output_width and self.output_height, point which is center base point coordinate,
+        relative to ROI region, of reference line. PLEASE NOTE FEATURES ARE BLACK
         """
         return_list = []
         for group in contour_group:
             representation_contour = group[1]
+
             sorted_points = sorted(representation_contour[0], key=lambda x: x[0])
             r_centroid = (int(representation_contour[1][0]), int(representation_contour[1][1]))
             r_1 = sorted_points[0]
+            r_2 = r_centroid
 
-            r_2 = sorted_points[1]
-
-            #if r_1[1] > r_2[1]:
+            if self.distance(r_1, r_2) <= 5:
+                # Don't include contours which are too small
+                continue
 
             angle = math.atan2(r_1[1] - r_2[1], r_1[0] - r_2[0]) * 180.0 / math.pi
-            """if angle < 0.0:
-                angle += 360.0
-            if angle > 180:
-                angle = 360 - angle"""
+
             angle1 = (angle + 360) % 360
             angle2 = (angle1 + 180) % 360
-            #print(angle1, angle2)
-            #kernel = np.array([[-1,-1,-1], [-1,1,-1], [-1,-1,-1]], dtype=np.uint8)
-            #input_img = cv2.filter2D(input_img, -1 ,kernel)
 
-            t_img = cv2.bitwise_not(input_img).copy() # now features/contours are black on white background
+            t_img = cv2.bitwise_not(input_img)  # now features/contours are black on white background
+
             t_img = cv2.cvtColor(t_img, cv2.COLOR_GRAY2BGR)
+            # Remove baseline contour by filling it to avoid feeeding baseline with the character in image
             cv2.drawContours(t_img, [representation_contour[3]], -1, (255, 255, 255), -1)
             t_img = cv2.cvtColor(t_img, cv2.COLOR_BGR2GRAY)
-            kernel = np.zeros((3,3), dtype=np.uint8)
-            #t_img = cv2.morphologyEx(t_img, cv2.MORPH_OPEN, kernel=kernel)
-            #t_img = cv2.morphologyEx(t_img, cv2.MORPH_OPEN, kernel=kernel)
-            #t_img = cv2.erode(t_img, kernel)
+
             rows, cols = t_img.shape
             root_mat = cv2.getRotationMatrix2D(r_centroid, angle, 1)
             rotated = cv2.warpAffine(t_img, root_mat, (cols, rows), borderMode=cv2.BORDER_CONSTANT,
                                     borderValue=(255, 255, 255))
 
             cropped_result = rotated[
-                             max(int(r_centroid[1] - self.output_height), 0):min(int(r_centroid[1] + 8), rotated.shape[0]),
+                             max(int(r_centroid[1] - self.output_height), 0):min(int(r_centroid[1]), rotated.shape[0]),
                              max(0, int(r_centroid[0] - self.output_width)):min(rotated.shape[1],
                                                                       int(r_centroid[0] + self.output_width))]
 
@@ -307,72 +221,32 @@ class Preprocessor:
                                     borderValue=(255, 255, 255))
 
             cropped_result_2 = rotated_2[
-                             max(int(r_centroid[1] - self.output_height), 0):min(int(r_centroid[1] + 8),
+                             max(int(r_centroid[1] - self.output_height), 0):min(int(r_centroid[1]),
                                                                                  rotated.shape[0]),
                              max(0, int(r_centroid[0] - self.output_width)):min(rotated.shape[1],
                                                                                 int(r_centroid[0] + self.output_width))]
 
+            # Compare image with normal angle and inverted angle and select angle which yields more black
             if cv2.countNonZero(cropped_result) > cv2.countNonZero(cropped_result_2):
                 cropped_result = cropped_result_2
 
+            # IMPORTANT: This post-processing process was added since it increased accuracy.
+            _, after_processing = cv2.threshold(cropped_result, 20, 255, cv2.THRESH_BINARY)
+            final_img = cv2.erode(after_processing, np.ones((3, 3), dtype=np.uint8))
 
-            """cropped_result = cv2.resize(cropped_result,None, fx=2.0, fy=2.0)
-
-            kernel = np.ones((5, 5), dtype=np.uint8)
-            cropped_result = cv2.erode(cropped_result, kernel)"""
-            """cropped_result = rotated[
-                             int(r_centroid[1] - self.output_height):int(r_centroid[1] + 4),
-                             int(r_centroid[0] - self.output_width):int(r_centroid[0] + self.output_width)]"""
-
-            #cropped_result = cv2.resize(cropped_result, (0, 0), fx=2, fy=2)
-
-
-            return_list.append((cropped_result, r_centroid))
+            return_list.append((final_img, r_centroid))
 
         return return_list
 
-    def find_baseline_and_deskew(self, input_img, line_group):
+    def locate_text(self, input_img):
         """
-        Given binary input_image and cluster data line_group, return list of tuples(img, point) where image is binary
-        deskewed image with size of self.output_width and height, and point which is center point of reference line.
-        :param input_img: Binary image where background is black, features are white
-        :param line_group: same format as output of self.cluster_lines
-        :return: list of tuples (img, point) where image is binary deskewed image where features are black,
-        with width, height of self.output_width and self.output_height, point which is center point coordinate,
-        relative to ROI region, of reference line.
+        On an average PC, total processing time for extracting 4 characters and running tesseract requires about 0.8
+        seconds. Since the text in-game moves horizontally real time, we need to be able to get near-realtime
+        coordinates of text features, compare the x values with the solved text and use the new coordinates.
+        :param input_img:
+        :return: A list of tuples (x,y) where each tuple is on top of a significant feature detected.
         """
-        return_list = []
-        for group in self.cluster_line_groups:
-
-            sorted_group = sorted(group, key=lambda x: max(x[0][1], x[0][3]))
-            representation_line = sorted_group[0]
-            r_c = representation_line[0]
-            r_centroid = representation_line[1]
-            angle = math.atan2(r_c[3] - r_c[1], r_c[2] - r_c[0]) * 180.0 / math.pi
-            #kernel = np.array([[-1,-1,-1], [-1,1,-1], [-1,-1,-1]], dtype=np.uint8)
-            #input_img = cv2.filter2D(input_img, -1 ,kernel)
-
-            t_img = cv2.bitwise_not(input_img).copy()
-            rows, cols = t_img.shape
-            root_mat = cv2.getRotationMatrix2D(representation_line[1], angle, 1)
-            rotated = cv2.warpAffine(t_img, root_mat, (cols, rows), borderMode=cv2.BORDER_CONSTANT,
-                                    borderValue=(255, 255, 255))
-
-
-            cropped_result = rotated[
-                             max(int(r_centroid[1] - self.output_height), 0):min(int(r_centroid[1] + 8), rotated.shape[0]),
-                             max(0, int(r_centroid[0] - self.output_width)):min(rotated.shape[1],
-                                                                      int(r_centroid[0] + self.output_width))]
-            """cropped_result = rotated[
-                             int(r_centroid[1] - self.output_height):int(r_centroid[1] + 4),
-                             int(r_centroid[0] - self.output_width):int(r_centroid[0] + self.output_width)]"""
-
-            #cropped_result = cv2.resize(cropped_result, (0, 0), fx=2, fy=2)
-
-
-            return_list.append((cropped_result, r_centroid))
-
-        return return_list
+        pass
 
     def run_tesseract(self, input_img, lang="eng", config="--psm 10"):
         """
@@ -390,65 +264,68 @@ class Preprocessor:
         :return: list of tuple (coord, value) where coord tuple (x,y) is a clickable region within input_image,
         value is computed value of character within coord region.
         """
-        input_img_background_removed = self.remove_background(input_img)
-        processed_img = self.threshold_and_preprocess(input_img_background_removed)
-        cluster_data = self.cluster_lines(processed_img)
-
-        deskewed_and_cropped = self.find_baseline_and_deskew(processed_img, cluster_data)
-
-        return_arr = []
-        for data in deskewed_and_cropped:
-            image, coord = data
-            tesseract_result = self.run_tesseract(image)
-            if tesseract_result:
-                output = tesseract_result
-            else:
-                output = ""
-            return_arr.append((coord, output))
-
-        return return_arr
+        pass
 
 if __name__ == "__main__":
     prc = Preprocessor()
+    time_avg = 0
+    image_count = 0
     for x in range(2, 12):
+        print("-" * 16)
         print(x)
-        start = time.time()
+
         img = prc.crop_roi(cv2.imread("images/source/%d.png"%(x), cv2.IMREAD_COLOR))
         representation = img.copy()
+        start_time = time.time()
+        bg_removal_start = time.time()
         tx = prc.remove_background(img)
-
-        processed, cont = prc.preprocess_alt(tx)
+        bg_removal_time = time.time() - bg_removal_start
+        process_start = time.time()
+        processed = prc.preprocess_alt(tx)
+        processing_time = time.time()-process_start
 
         #cv2.drawContours(tx, cont, -1, (0,255,0), -1)
-        cv2.imshow("processed", processed)
-        cv2.imshow("bg", tx)
-
-        """contour_groups = prc.find_text_contour_hierachy(processed)
-        for deskewed, ct in prc.find_baseline_and_deskew_from_contour(processed, contour_groups):
-            print(prc.run_tesseract(deskewed))"""
-        print("time", time.time() - start)
-        cv2.waitKey(0)
+        #cv2.imshow("processed", processed)
+        #cv2.imshow("bg", tx)
+        contour_start = time.time()
+        contour_groups = prc.find_text_contour_hierachy(processed)
+        clustering_time = time.time() - contour_start
         """for group in contour_groups:
             color = (random.randrange(0, 254), random.randrange(0, 254), random.randrange(0, 254))
             #print(group[0])
             #print(group[1])
             contours, lowest_contour = group
-            cv2.circle(tx, lowest_contour[1], 3, (0,0,255), -1)
+            #print(lowest_contour)
+            cv2.circle(representation, lowest_contour[1], 3, (255,0,0), -1)
 
-            cv2.circle(tx, lowest_contour[0][0], 2, (0,0,255), -1)
-            cv2.circle(tx, lowest_contour[0][1], 2, (0,0,255), -1)"""
-
-
-
+            cv2.circle(representation, lowest_contour[0][0], 2, (0,255,0), -1)
+            #cv2.circle(representation, lowest_contour[0][1], 2, (0,0,255), -1)"""
 
 
-        """for deskewed, ct in prc.find_baseline_and_deskew_from_contour(processed, contour_groups):
-            result = prc.run_tesseract(deskewed)
-            cv2.imshow("des", deskewed)
-            print(result)
-            cv2.putText(representation, result, ct, cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-            cv2.waitKey(0)"""
+        cv2.destroyAllWindows()
+        deskew_start = time.time()
+        deskewed = prc.find_baseline_and_deskew_from_contour(processed, contour_groups)
+        deskew_time = time.time() - deskew_start
+        ocr_start = time.time()
+        for img, ct in deskewed:
+            prc.run_tesseract(img)
+        ocr_time = time.time() - ocr_start
+        #cv2.imshow("rep", representation)
+        total_time = time.time() - start_time
+        time_avg = total_time if not time_avg else (time_avg*image_count+total_time)/(image_count+1)
+        image_count += 1
 
+        print("bg removal:".ljust(20, " "), str(round(bg_removal_time, 4)) + "s",round(bg_removal_time / total_time * 100, 1), "%")
+        print("preprocessing:".ljust(20, " "), str(round(processing_time, 4))+"s", round(processing_time/total_time*100, 1), "%")
+        print("clustering:".ljust(20, " "), str(round(clustering_time, 4))+"s", round(clustering_time / total_time * 100, 1), "%")
+        print("deskewing:".ljust(20, " "), str(round(deskew_time, 4))+"s", round(deskew_time / total_time * 100, 1), "%")
+        print("OCR:".ljust(20, " "), str(round(ocr_time, 4)) + "s", round(ocr_time / total_time * 100, 1),"%")
+        print("")
+        print("total time:".ljust(20, " "), str(round(total_time, 4)) + "s")
+        #cv2.waitKey(0)
+
+    print("-" * 16)
+    print("average total time:".ljust(20, " "), str(round(time_avg, 4))+"s")
 
 
 
