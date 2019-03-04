@@ -7,12 +7,12 @@ logger.addHandler(fh)
 logger.debug("Program start")
 try:
     from image_processor import Preprocessor
-    from screencap import MapleScreenCapturer
+    from screencap import ScreenCapturer
     import cv2, imutils, numpy as np, time
 except:
     logger.exception("오류 발생!")
     os.system("pause")
-scap = MapleScreenCapturer()
+scap = ScreenCapturer()
 window_handle = scap.ms_get_screen_hwnd()
 processor = Preprocessor(background_img="background.png")
 logger.debug("Window handle: " + str(window_handle))

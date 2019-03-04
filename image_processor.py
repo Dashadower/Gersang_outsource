@@ -16,11 +16,14 @@ class Preprocessor:
         self.cluster_contour_groups = []
         self.cluster_contour_centroids_in_class = []
 
-        self.output_width = 40
+        self.output_width = 30  # actual output width is output_width * 2
         self.output_height = 60
 
     def crop_roi(self, input_img):
         return input_img[self.roi_area[1]:self.roi_area[3], self.roi_area[0]:self.roi_area[2]]
+
+    def distance(self, p1, p2):
+        return math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2)
 
     def remove_background(self, input_img):
         """
@@ -63,15 +66,12 @@ class Preprocessor:
         """
         input_gray = cv2.cvtColor(input_image, cv2.COLOR_BGR2GRAY)
 
-        _, threshed = cv2.threshold(input_gray, 50, 255, cv2.THRESH_BINARY)
+        #_, threshed = cv2.threshold(input_gray, 50, 255, cv2.THRESH_BINARY)
+        _, threshed = cv2.threshold(input_gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)  # use otsu??
 
-        denoised = cv2.fastNlMeansDenoising(threshed, h=15, templateWindowSize=7, searchWindowSize=21)
+        denoised = cv2.fastNlMeansDenoising(threshed, h=17, templateWindowSize=7, searchWindowSize=21)
 
         return denoised
-
-    def distance(self, p1, p2):
-        return math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2)
-
 
     def find_text_contour_hierachy(self, input_img):
         """
@@ -198,7 +198,6 @@ class Preprocessor:
 
             angle1 = (angle + 360) % 360
             angle2 = (angle1 + 180) % 360
-
             t_img = cv2.bitwise_not(input_img)  # now features/contours are black on white background
 
             t_img = cv2.cvtColor(t_img, cv2.COLOR_GRAY2BGR)
@@ -231,19 +230,21 @@ class Preprocessor:
                 cropped_result = cropped_result_2
 
             # IMPORTANT: This post-processing process was added since it increased accuracy.
-            _, after_processing = cv2.threshold(cropped_result, 20, 255, cv2.THRESH_BINARY)
-            final_img = cv2.erode(after_processing, np.ones((3, 3), dtype=np.uint8))
-
-            return_list.append((final_img, r_centroid))
+            #cv2.imwrite("images/cropped_letters/pre-%s.png"%(str(r_centroid)), cropped_result)
+            #_, after_processing = cv2.threshold(cropped_result, 254 , 255, cv2.THRESH_BINARY)
+            #final_img = cv2.erode(cropped_result, np.ones((3, 3), dtype=np.uint8))
+            #final_img = after_processing
+            return_list.append((cropped_result, r_centroid))
 
         return return_list
 
-    def locate_text(self, input_img):
+    def fast_locate_text(self, input_img):
         """
         On an average PC, total processing time for extracting 4 characters and running tesseract requires about 0.8
         seconds. Since the text in-game moves horizontally real time, we need to be able to get near-realtime
         coordinates of text features, compare the x values with the solved text and use the new coordinates.
-        :param input_img:
+        This function rapidly returns the approximate x, y coordinates of contours found on the image.
+        :param input_img: full input image of gersang window.
         :return: A list of tuples (x,y) where each tuple is on top of a significant feature detected.
         """
         pass
@@ -271,9 +272,8 @@ if __name__ == "__main__":
     time_avg = 0
     image_count = 0
     for x in range(2, 12):
-        print("-" * 16)
+        print("-" * 20)
         print(x)
-
         img = prc.crop_roi(cv2.imread("images/source/%d.png"%(x), cv2.IMREAD_COLOR))
         representation = img.copy()
         start_time = time.time()
@@ -283,14 +283,13 @@ if __name__ == "__main__":
         process_start = time.time()
         processed = prc.preprocess_alt(tx)
         processing_time = time.time()-process_start
-
         #cv2.drawContours(tx, cont, -1, (0,255,0), -1)
         #cv2.imshow("processed", processed)
         #cv2.imshow("bg", tx)
         contour_start = time.time()
         contour_groups = prc.find_text_contour_hierachy(processed)
         clustering_time = time.time() - contour_start
-        """for group in contour_groups:
+        for group in contour_groups:
             color = (random.randrange(0, 254), random.randrange(0, 254), random.randrange(0, 254))
             #print(group[0])
             #print(group[1])
@@ -299,17 +298,19 @@ if __name__ == "__main__":
             cv2.circle(representation, lowest_contour[1], 3, (255,0,0), -1)
 
             cv2.circle(representation, lowest_contour[0][0], 2, (0,255,0), -1)
-            #cv2.circle(representation, lowest_contour[0][1], 2, (0,0,255), -1)"""
+            #cv2.circle(representation, lowest_contour[0][1], 2, (0,0,255), -1)
 
 
-        cv2.destroyAllWindows()
+
         deskew_start = time.time()
         deskewed = prc.find_baseline_and_deskew_from_contour(processed, contour_groups)
         deskew_time = time.time() - deskew_start
-        ocr_start = time.time()
+        for img, ct in deskewed:
+            cv2.imwrite("images/cropped_letters/%d-%s.png"%(x, str(ct)), img)
+        """ocr_start = time.time()
         for img, ct in deskewed:
             prc.run_tesseract(img)
-        ocr_time = time.time() - ocr_start
+        ocr_time = time.time() - ocr_start"""
         #cv2.imshow("rep", representation)
         total_time = time.time() - start_time
         time_avg = total_time if not time_avg else (time_avg*image_count+total_time)/(image_count+1)
@@ -319,14 +320,14 @@ if __name__ == "__main__":
         print("preprocessing:".ljust(20, " "), str(round(processing_time, 4))+"s", round(processing_time/total_time*100, 1), "%")
         print("clustering:".ljust(20, " "), str(round(clustering_time, 4))+"s", round(clustering_time / total_time * 100, 1), "%")
         print("deskewing:".ljust(20, " "), str(round(deskew_time, 4))+"s", round(deskew_time / total_time * 100, 1), "%")
-        print("OCR:".ljust(20, " "), str(round(ocr_time, 4)) + "s", round(ocr_time / total_time * 100, 1),"%")
+        #print("OCR:".ljust(20, " "), str(round(ocr_time, 4)) + "s", round(ocr_time / total_time * 100, 1),"%")
         print("")
         print("total time:".ljust(20, " "), str(round(total_time, 4)) + "s")
         #cv2.waitKey(0)
 
     print("-" * 16)
     print("average total time:".ljust(20, " "), str(round(time_avg, 4))+"s")
-
+    cv2.destroyAllWindows()
 
 
 

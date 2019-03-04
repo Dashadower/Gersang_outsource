@@ -1,11 +1,11 @@
 # -*- coding:utf-8 -*-
-import win32gui, time
+import win32gui, time, ctypes
 from PIL import ImageGrab
 
 gersang_window_title = "Gersang"
 
-class MapleScreenCapturer:
-    """Container for capturing MS screen"""
+class ScreenCapturer:
+    """Container for capturing specific screen"""
     def __init__(self):
         self.hwnd = None
 
@@ -17,7 +17,30 @@ class MapleScreenCapturer:
             return window_hwnd
 
     def ms_get_screen_rect(self, hwnd):
-        return win32gui.GetWindowRect(hwnd)
+        """
+        Added compatibility code from
+        https://stackoverflow.com/questions/51786794/using-imagegrab-with-bbox-from-pywin32s-getwindowrect
+        :param hwnd: window handle from self.ms_get_screen_hwnd
+        :return: window rect (x1, y1, x2, y2) of MS rect.
+        """
+        try:
+            f = ctypes.windll.dwmapi.DwmGetWindowAttribute
+        except WindowsError:
+            f = None
+        if f:  # Vista & 7 stuff
+            rect = ctypes.wintypes.RECT()
+            DWMWA_EXTENDED_FRAME_BOUNDS = 9
+            f(ctypes.wintypes.HWND(self.ms_get_screen_hwnd()),
+              ctypes.wintypes.DWORD(DWMWA_EXTENDED_FRAME_BOUNDS),
+              ctypes.byref(rect),
+              ctypes.sizeof(rect)
+              )
+            size = (rect.left, rect.top, rect.right, rect.bottom)
+        else:
+            if not hwnd:
+                hwnd = self.ms_get_screen_hwnd()
+            size = win32gui.GetWindowRect(hwnd)
+        return size  # returns x1, y1, x2, y2
 
     def capture(self, set_focus=True, hwnd=None, rect=None):
 
