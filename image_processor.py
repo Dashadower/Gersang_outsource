@@ -321,7 +321,6 @@ if __name__ == "__main__":
         print("clustering:".ljust(20, " "), str(round(clustering_time, 4))+"s", round(clustering_time / total_time * 100, 1), "%")
         print("deskewing:".ljust(20, " "), str(round(deskew_time, 4))+"s", round(deskew_time / total_time * 100, 1), "%")
         #print("OCR:".ljust(20, " "), str(round(ocr_time, 4)) + "s", round(ocr_time / total_time * 100, 1),"%")
-        print("")
         print("total time:".ljust(20, " "), str(round(total_time, 4)) + "s")
         #cv2.waitKey(0)
 
